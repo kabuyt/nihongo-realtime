@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ff6b9d">
+<title>にほんご リアルタイム かいわ</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:linear-gradient(135deg,#fce4ec,#e8eaf6);min-height:100vh;color:#333;overflow-x:hidden}
+
+/* Header */
+.header{background:linear-gradient(135deg,#ff6b9d,#c084fc);color:#fff;padding:12px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+.header h1{font-size:18px;letter-spacing:1px}
+.header-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lesson-select{background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);border-radius:20px;color:#fff;padding:6px 14px;font-size:14px;font-weight:bold;cursor:pointer;-webkit-appearance:none}
+.lesson-select option{color:#333;background:#fff}
+.btn-end{background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);border-radius:20px;color:#fff;padding:6px 12px;font-size:13px;cursor:pointer}
+
+/* Character */
+.character-area{display:flex;flex-direction:column;align-items:center;padding:30px 0 10px}
+.face{width:150px;height:150px;background:linear-gradient(135deg,#ffe0b2,#ffcc80);border-radius:50%;position:relative;box-shadow:0 8px 25px rgba(0,0,0,.15);border:4px solid #fff}
+.eye{position:absolute;width:20px;height:24px;background:#333;border-radius:50%;top:50px}
+.eye-left{left:38px}
+.eye-right{right:38px}
+.eye-shine{position:absolute;width:7px;height:7px;background:#fff;border-radius:50%;top:4px;left:3px}
+.eye.blink{animation:blink 0.15s ease-in-out}
+@keyframes blink{0%,100%{transform:scaleY(1)}50%{transform:scaleY(0.05)}}
+
+/* Mouth states */
+.mouth{position:absolute;bottom:35px;left:50%;transform:translateX(-50%);width:30px;height:15px;background:#e57373;border-radius:0 0 15px 15px;transition:all .1s}
+.mouth.smile{width:35px;height:10px;background:transparent;border-bottom:3px solid #e57373;border-radius:0 0 20px 20px;bottom:38px}
+.mouth.speaking{animation:speak .25s infinite alternate}
+@keyframes speak{0%{height:8px;width:22px;border-radius:50%}100%{height:20px;width:28px;border-radius:50%}}
+.mouth.thinking{width:12px;height:12px;border-radius:50%;bottom:38px;background:#e57373}
+
+/* Blush */
+.blush{position:absolute;width:22px;height:14px;background:rgba(255,138,128,.4);border-radius:50%;top:72px}
+.blush-left{left:22px}
+.blush-right{right:22px}
+
+/* Eye animations */
+.eye.thinking{animation:lookAround 1.5s infinite}
+@keyframes lookAround{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.eye.listening .eye-shine{animation:sparkle .8s infinite}
+@keyframes sparkle{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.8);opacity:.6}}
+
+/* Status text */
+.status-text{margin-top:12px;font-size:13px;color:#999;min-height:20px}
+
+/* Connection indicator */
+.conn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ccc;margin-right:6px;vertical-align:middle}
+.conn-dot.connected{background:#4caf50;animation:connPulse 2s infinite}
+.conn-dot.connecting{background:#ff9800;animation:connPulse .6s infinite}
+.conn-dot.error{background:#ef5350}
+@keyframes connPulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* VAD mic indicator */
+.vad-indicator{display:flex;align-items:center;gap:6px;justify-content:center;margin-top:6px;font-size:12px;color:#aaa}
+.vad-bar{width:3px;height:12px;background:#ddd;border-radius:2px;transition:height .1s,background .1s}
+.vad-bar.active{background:linear-gradient(#ff6b9d,#c084fc)}
+
+/* Speech bubble */
+.bubble-area{padding:10px 20px;min-height:80px;display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:85%;padding:12px 16px;border-radius:18px;font-size:15px;line-height:1.7;animation:fadeUp .3s ease;word-break:break-word}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.bubble.ai{background:#fff;color:#333;align-self:flex-start;border-bottom-left-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.bubble.user{background:linear-gradient(135deg,#7c4dff,#536dfe);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.bubble.ai.streaming{border-bottom-left-radius:18px;opacity:.85}
+
+/* Bottom input area */
+.mic-area{position:fixed;bottom:0;left:0;right:0;padding:12px 16px;background:linear-gradient(transparent,rgba(252,228,236,.97) 30%)}
+.mic-row{display:flex;justify-content:center;align-items:center;gap:16px}
+.text-row{display:flex;gap:8px;margin-top:8px}
+.text-row input{flex:1;padding:10px 14px;border:2px solid #e0e0e0;border-radius:24px;font-size:15px;outline:none;font-family:inherit}
+.text-row input:focus{border-color:#c084fc}
+.text-row button{background:linear-gradient(135deg,#ff6b9d,#c084fc);color:#fff;border:none;border-radius:24px;padding:10px 16px;font-size:14px;cursor:pointer;white-space:nowrap}
+.btn-mic{width:72px;height:72px;border-radius:50%;border:none;background:linear-gradient(135deg,#e0e0e0,#bdbdbd);color:#fff;font-size:30px;cursor:pointer;box-shadow:0 4px 15px rgba(0,0,0,.15);transition:all .2s;display:flex;align-items:center;justify-content:center}
+.btn-mic.connected{background:linear-gradient(135deg,#ff6b9d,#c084fc);box-shadow:0 4px 15px rgba(255,107,157,.4)}
+.btn-mic.user-speaking{background:linear-gradient(135deg,#ef5350,#f44336);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(244,67,54,.4)}50%{box-shadow:0 0 0 15px rgba(244,67,54,0)}}
+.btn-reset{width:44px;height:44px;border-radius:50%;border:none;background:#fff;color:#999;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.btn-reset:active{transform:scale(.9)}
+
+/* Bottom spacer */
+.bottom-spacer{height:130px}
+
+/* Splash */
+.splash{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;padding:40px 20px;text-align:center}
+.splash h2{font-size:22px;margin-bottom:8px;color:#333}
+.splash p{font-size:14px;color:#666;margin-bottom:8px;line-height:1.6}
+.splash .note{font-size:12px;color:#aaa;margin-bottom:24px}
+.lesson-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:320px;margin-bottom:20px}
+.lesson-card{background:#fff;border-radius:16px;padding:18px 12px;box-shadow:0 2px 10px rgba(0,0,0,.08);cursor:pointer;transition:all .2s;border:2px solid transparent}
+.lesson-card:active{transform:scale(.96)}
+.lesson-card:hover{border-color:#c084fc}
+.lesson-card .num{font-size:28px;font-weight:bold;background:linear-gradient(135deg,#ff6b9d,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.lesson-card .desc{font-size:12px;color:#888;margin-top:4px}
+.realtime-badge{background:linear-gradient(135deg,#ff6b9d,#c084fc);color:#fff;font-size:11px;padding:3px 10px;border-radius:12px;margin-bottom:16px;display:inline-block}
+</style>
+</head>
+<body>
+
+<!-- ===== Cloudflare Worker の URL をここに設定 ===== -->
+<!-- デプロイ後に変更: https://nihongo-realtime-api.YOUR.workers.dev -->
+
+<!-- Header -->
+<div class="header" id="headerBar" style="display:none">
+  <div class="header-row">
+    <select class="lesson-select" id="lessonSelect" onchange="changeLesson()">
+      <option value="1">だい1か</option>
+      <option value="2">だい2か</option>
+      <option value="3">だい3か</option>
+      <option value="4">だい4か</option>
+    </select>
+    <h1>にほんご かいわ</h1>
+    <button class="btn-end" onclick="endSession()">おわる</button>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="appMain" style="display:none">
+  <div class="character-area">
+    <div class="face" id="face">
+      <div class="eye eye-left" id="eyeL"><div class="eye-shine"></div></div>
+      <div class="eye eye-right" id="eyeR"><div class="eye-shine"></div></div>
+      <div class="blush blush-left"></div>
+      <div class="blush blush-right"></div>
+      <div class="mouth smile" id="mouth"></div>
+    </div>
+    <div class="status-text" id="statusText">
+      <span class="conn-dot" id="connDot"></span>
+      <span id="statusMsg">つないでいます...</span>
+    </div>
+    <!-- VAD リアルタイム インジケーター -->
+    <div class="vad-indicator" id="vadIndicator" style="display:none">
+      <span id="vadLabel">マイクON</span>
+      <div class="vad-bar" id="vb1"></div>
+      <div class="vad-bar" id="vb2"></div>
+      <div class="vad-bar" id="vb3"></div>
+      <div class="vad-bar" id="vb4"></div>
+    </div>
+  </div>
+
+  <div class="bubble-area" id="bubbleArea"></div>
+  <div class="bottom-spacer"></div>
+
+  <div class="mic-area">
+    <div class="mic-row">
+      <button class="btn-reset" onclick="resetChat()" title="リセット">🔄</button>
+      <button class="btn-mic" id="btnMic" onclick="toggleMic()">🎤</button>
+    </div>
+    <div class="text-row">
+      <input type="text" id="textInput" placeholder="タイプして はなす..." onkeydown="if(event.key==='Enter')sendText()">
+      <button onclick="sendText()">おくる</button>
+    </div>
+  </div>
+</div>
+
+<!-- Splash Screen -->
+<div id="splash" class="splash">
+  <div class="face" style="width:120px;height:120px;margin-bottom:20px">
+    <div class="eye eye-left" style="top:40px;left:30px;width:16px;height:20px"><div class="eye-shine" style="width:6px;height:6px"></div></div>
+    <div class="eye eye-right" style="top:40px;right:30px;width:16px;height:20px"><div class="eye-shine" style="width:6px;height:6px"></div></div>
+    <div class="blush blush-left" style="top:58px;left:16px;width:18px;height:12px"></div>
+    <div class="blush blush-right" style="top:58px;right:16px;width:18px;height:12px"></div>
+    <div class="mouth smile" style="bottom:28px;width:28px"></div>
+  </div>
+  <div class="realtime-badge">⚡ リアルタイム AI かいわ</div>
+  <h2>にほんご かいわ れんしゅう</h2>
+  <p>みんなの にほんご<br>かいわを れんしゅう しましょう！</p>
+  <p class="note">マイクを つかって じゆうに はなしてください</p>
+  <div class="lesson-grid">
+    <div class="lesson-card" onclick="startLesson(1)">
+      <div class="num">1</div>
+      <div class="desc">じこしょうかい</div>
+    </div>
+    <div class="lesson-card" onclick="startLesson(2)">
+      <div class="num">2</div>
+      <div class="desc">これ・それ・あれ</div>
+    </div>
+    <div class="lesson-card" onclick="startLesson(3)">
+      <div class="num">3</div>
+      <div class="desc">ここ・そこ・あそこ</div>
+    </div>
+    <div class="lesson-card" onclick="startLesson(4)">
+      <div class="num">4</div>
+      <div class="desc">〜ます・じかん</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 設定 =====
+// デプロイ後に Cloudflare Worker の URL を設定してください
+const WORKER_URL = 'wss://nihongo-realtime-api.kabuyt.workers.dev'; // デプロイ済み
+const MODEL = 'gpt-4o-mini-realtime-preview';
+
+// ===== 課別システムプロンプト =====
+const LESSON_PROMPTS = {
+  1: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
+
+【使える文法】第1課だけ：
+- 〜は 〜です（わたしは がくせいです）
+- 〜じゃ ありません（せんせいじゃ ありません）
+- 〜ですか（がくせいですか？）
+- はい、そうです / いいえ、ちがいます
+- 〜も 〜です（わたしも がくせいです）
+- 〜の 〜（にほんの だいがく）※所属だけ
+
+【使える語彙】
+- あいさつ：こんにちは、はじめまして、どうぞよろしく
+- 人：わたし、あなた、〜さん、せんせい、がくせい、かいしゃいん、いしゃ、エンジニア
+- 国：にほん、ちゅうごく、かんこく、アメリカ、ブラジル、インドなど
+- 数字：0〜10、〜さい（年齢）
+- その他：なまえ、おくに、おしごと、なんさい、だれ、はい、いいえ
+
+【禁止】以下は絶対に使わないでください：
+- 形容詞（すき、おおきい、たかい、いい など）
+- 動詞の〜ます形（たべます、いきます など）
+- これ/それ/あれ、ここ/そこ/あそこ
+- 第2課以降のすべての文法と語彙
+
+【ルール】
+- 短い文で話す（1〜2文）
+- 漢字は使わない（ひらがな・カタカナのみ）
+- 学習者の間違いはやさしく直す
+- 話すスピードはゆっくり
+
+最初のあいさつ：「こんにちは！わたしは はなです。おなまえは？」`,
+
+  2: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
+
+【使える文法】第1〜2課：
+- 第1課：〜は〜です、〜ですか、〜も〜です
+- 第2課：これ/それ/あれ は 〜です、この/その/あの 〜、〜の〜（所有）、〜は なんですか
+
+【使える語彙】第1〜2課のみ：
+- 第1課の語彙すべて
+- もの：ほん、ざっし、じしょ、ノート、てちょう、かぎ、とけい、かさ、かばん、えんぴつ、ボールペン、めいし
+- ことば：これ、それ、あれ、この、その、あの、なん（なに）、だれの、そうですか、ちがいます
+
+【禁止】以下は絶対に使わないでください：
+- 形容詞（すき、おおきい、たかい、いい など）
+- 動詞の〜ます形（たべます、いきます など）
+- ここ/そこ/あそこ（場所の指示語）
+- 第3課以降のすべての文法と語彙
+
+【ルール】
+- 短い文で話す（1〜2文）
+- 漢字は使わない
+- 学習者の間違いはやさしく直す
+- 話すスピードはゆっくり
+
+最初のあいさつ：「こんにちは！あ、それは なんですか？」`,
+
+  3: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
+
+【使える文法】第1〜3課：
+- 第1〜2課：〜は〜です、これ/それ/あれ、この/その/あの
+- 第3課：ここ/そこ/あそこ は 〜です、〜は どこですか、〜は 〜かいです（階）、〜えんです（値段）
+
+【使える語彙】第1〜3課のみ：
+- 第1〜2課の語彙すべて
+- 場所：ここ、そこ、あそこ、どこ、トイレ、かいだん、エレベーター、じむしょ、しょくどう、うけつけ、ロビー
+- 店：デパート、スーパー、ぎんこう、ゆうびんきょく、としょかん、びょういん
+- 数字：ひゃく、せん、まん（値段）、〜かい（階）
+
+【禁止】以下は絶対に使わないでください：
+- 動詞の〜ます形（たべます、いきます など）
+- 形容詞（すき、おおきい、たかい、いい など）
+- 時間の表現（なんじ、〜じ、〜から〜まで）
+- 第4課以降のすべての文法と語彙
+
+【ルール】
+- 短い文で話す（1〜2文）
+- 漢字は使わない
+- 学習者の間違いはやさしく直す
+- 話すスピードはゆっくり
+
+最初のあいさつ：「こんにちは！ここは がっこうですね。としょかんは どこですか？」`,
+
+  4: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
+
+【使える文法】第1〜4課：
+- 第1〜3課：〜は〜です、これ/それ/あれ、ここ/そこ/あそこ
+- 第4課：〜ます / 〜ません / 〜ますか、なんじに 〜ますか、〜じ 〜ふんに、〜から 〜まで、〜と いっしょに、〜で（手段）
+
+【使える語彙】第1〜4課のみ：
+- 第1〜3課の語彙すべて
+- 動詞（ます形のみ）：おきます、ねます、はたらきます、やすみます、べんきょうします、おわります
+- 時間：なんじ、〜じ、〜ふん、ごぜん、ごご、あさ、ひる、ばん、よる
+- 曜日：げつようび〜にちようび
+- その他：まいにち、まいあさ、まいばん、いつ、たいへんですね
+
+【禁止】以下は絶対に使わないでください：
+- 形容詞（すき、おおきい、たかい、いい など）
+- 〜ましょう（誘い）、〜たいです（希望）、〜ています（進行形）
+- いきます、きます、かえります（第5課の動詞）
+- 第5課以降のすべての文法と語彙
+
+【ルール】
+- 短い文で話す（1〜2文）
+- 漢字は使わない
+- 学習者の間違いはやさしく直す
+- 話すスピードはゆっくり
+
+最初のあいさつ：「こんにちは！まいにち なんじに おきますか？」`
+};
+
+// ===== AudioWorklet プロセッサ（マイク → PCM16 変換）=====
+const PCM16_PROCESSOR = `
+class PCM16Processor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._buffer = new Float32Array(0);
+    // 約100ms分をバッファしてから送る (24000 * 0.1 = 2400 samples)
+    this._targetSize = 2400;
+  }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (!channel || channel.length === 0) return true;
+
+    // バッファに追加
+    const newBuf = new Float32Array(this._buffer.length + channel.length);
+    newBuf.set(this._buffer);
+    newBuf.set(channel, this._buffer.length);
+    this._buffer = newBuf;
+
+    // targetSize 以上たまったら送信
+    while (this._buffer.length >= this._targetSize) {
+      const chunk = this._buffer.slice(0, this._targetSize);
+      this._buffer = this._buffer.slice(this._targetSize);
+
+      const int16 = new Int16Array(chunk.length);
+      for (let i = 0; i < chunk.length; i++) {
+        int16[i] = Math.max(-32768, Math.min(32767, chunk[i] * 32768));
+      }
+      this.port.postMessage(int16.buffer, [int16.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor('pcm16-processor', PCM16Processor);
+`;
+
+// ===== State =====
+let currentLesson = 1;
+let ws = null;
+let audioCtx = null;
+let micStream = null;
+let micWorklet = null;
+let isMicMuted = false;
+let blinkInterval = null;
+
+// PCM16 再生管理
+let nextPlayTime = 0;
+let activeSources = [];
+
+// AI バブル（ストリーミング中）
+let aiStreamBubble = null;
+let aiStreamText = '';
+let aiResponseId = null;
+
+// ===== レッスン開始（ユーザージェスチャー内で実行） =====
+async function startLesson(num) {
+  currentLesson = num;
+
+  // --- iOS AudioContext: ジェスチャー内で同期的に resume() を呼ぶ ---
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+    audioCtx.resume(); // await しない — iOS はこの同期呼び出しでアンロックする
+  } catch (err) {
+    showSplashError('AudioContext エラー: ' + err.message);
+    return;
+  }
+
+  showMainUI(num);
+  setStatus('connecting', 'マイクを つないでいます...');
+
+  try {
+    // マイク取得
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      sampleRate: 24000,
+    }});
+
+    // AudioWorklet ロード（Blob URL 経由でインラインコードを読み込む）
+    const blob = new Blob([PCM16_PROCESSOR], { type: 'application/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+    await audioCtx.audioWorklet.addModule(blobUrl);
+    URL.revokeObjectURL(blobUrl);
+
+    // マイク → WorkletNode（出力には接続しない ＝ 自分の声は再生しない）
+    const micSource = audioCtx.createMediaStreamSource(micStream);
+    micWorklet = new AudioWorkletNode(audioCtx, 'pcm16-processor');
+    micSource.connect(micWorklet);
+
+    // WorkletNode から PCM16 チャンクを受け取り → WebSocket 送信
+    micWorklet.port.onmessage = (event) => {
+      if (isMicMuted) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const base64 = arrayBufferToBase64(event.data);
+      ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }));
+    };
+
+    // WebSocket 接続
+    connectWebSocket();
+
+  } catch (err) {
+    console.error('Setup error:', err);
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      setStatus('error', 'マイクを ゆるしてください 🎤');
+    } else {
+      setStatus('error', 'エラー: ' + err.message);
+    }
+  }
+}
+
+// ===== WebSocket 接続 =====
+function connectWebSocket() {
+  setStatus('connecting', 'OpenAI に つないでいます...');
+
+  ws = new WebSocket(`${WORKER_URL}?model=${encodeURIComponent(MODEL)}`);
+
+  ws.onopen = () => {
+    setStatus('connected', 'つながりました！');
+    document.getElementById('btnMic').classList.add('connected');
+    document.getElementById('vadIndicator').style.display = 'flex';
+
+    // セッション設定を送信
+    ws.send(JSON.stringify({
+      type: 'session.update',
+      session: {
+        modalities: ['audio', 'text'],
+        instructions: LESSON_PROMPTS[currentLesson],
+        voice: 'shimmer',
+        input_audio_format: 'pcm16',
+        output_audio_format: 'pcm16',
+        input_audio_transcription: { model: 'whisper-1' },
+        turn_detection: {
+          type: 'server_vad',
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 600,
+        },
+      }
+    }));
+
+    // AIの最初のあいさつをトリガー
+    ws.send(JSON.stringify({ type: 'response.create' }));
+  };
+
+  ws.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); }
+    catch { return; }
+    handleServerEvent(msg);
+  };
+
+  ws.onclose = (event) => {
+    document.getElementById('btnMic').classList.remove('connected');
+    document.getElementById('vadIndicator').style.display = 'none';
+    if (event.code !== 1000 && event.code !== 1001) {
+      setStatus('error', `切断されました (${event.code})`);
+    }
+    ws = null;
+  };
+
+  ws.onerror = () => {
+    setStatus('error', '接続エラー。WorkerのURLを確認してください。');
+  };
+}
+
+// ===== サーバーイベント処理 =====
+function handleServerEvent(msg) {
+  switch (msg.type) {
+
+    case 'session.created':
+    case 'session.updated':
+      // セッション確立 OK
+      break;
+
+    // ユーザーが話し始めた（VAD 検出）
+    case 'input_audio_buffer.speech_started':
+      setFaceState('listening');
+      setStatus('connected', 'きいています... 🎧');
+      vadAnimate(true);
+      // AI の再生を中断
+      stopPlayback();
+      // 進行中のレスポンスをキャンセル
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'response.cancel' }));
+      }
+      // ストリーミング中のバブルを確定
+      finalizeAiBubble();
+      break;
+
+    // ユーザーが話し終わった（VAD 検出）
+    case 'input_audio_buffer.speech_stopped':
+      setFaceState('thinking');
+      setStatus('connected', 'かんがえています...');
+      vadAnimate(false);
+      break;
+
+    // ユーザー音声の文字起こし完了
+    case 'conversation.item.input_audio_transcription.completed':
+      if (msg.transcript && msg.transcript.trim()) {
+        addBubble(msg.transcript.trim(), 'user');
+      }
+      break;
+
+    // AI レスポンス開始
+    case 'response.created':
+      aiResponseId = msg.response?.id || null;
+      aiStreamText = '';
+      aiStreamBubble = null;
+      setFaceState('thinking');
+      break;
+
+    // AI 音声ストリーム（チャンク）
+    case 'response.audio.delta':
+      if (msg.delta) {
+        setFaceState('speaking');
+        setStatus('connected', 'はなしています...');
+        playPCM16Chunk(msg.delta);
+      }
+      break;
+
+    // AI 音声テキスト（ストリーミング）
+    case 'response.audio_transcript.delta':
+      if (msg.delta) {
+        aiStreamText += msg.delta;
+        updateStreamingBubble(aiStreamText);
+      }
+      break;
+
+    // AI 音声テキスト完了
+    case 'response.audio_transcript.done':
+      finalizeAiBubble();
+      break;
+
+    // AI テキスト（audio なし fallback）
+    case 'response.text.delta':
+      if (msg.delta) {
+        aiStreamText += msg.delta;
+        updateStreamingBubble(aiStreamText);
+      }
+      break;
+
+    case 'response.text.done':
+      finalizeAiBubble();
+      break;
+
+    // レスポンス完了
+    case 'response.done':
+      setFaceState('idle');
+      setStatus('connected', '');
+      break;
+
+    // エラー
+    case 'error':
+      console.error('Realtime API error:', msg.error);
+      setStatus('error', 'エラー: ' + (msg.error?.message || 'unknown'));
+      setFaceState('idle');
+      finalizeAiBubble();
+      break;
+  }
+}
+
+// ===== PCM16 再生 =====
+function playPCM16Chunk(base64) {
+  if (!audioCtx) return;
+
+  // base64 → Int16Array → Float32Array
+  const bytes = base64ToUint8(base64);
+  const int16 = new Int16Array(bytes.buffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) {
+    float32[i] = int16[i] / 32768;
+  }
+
+  if (float32.length === 0) return;
+
+  const buffer = audioCtx.createBuffer(1, float32.length, 24000);
+  buffer.getChannelData(0).set(float32);
+
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+  source.onended = () => {
+    activeSources = activeSources.filter(s => s !== source);
+    // 全チャンク再生完了 → idle に戻す
+    if (activeSources.length === 0) {
+      setFaceState('idle');
+    }
+  };
+
+  // gapless 再生: 前のチャンクの終了時刻から連続再生
+  const now = audioCtx.currentTime;
+  if (nextPlayTime < now) nextPlayTime = now;
+  source.start(nextPlayTime);
+  nextPlayTime += buffer.duration;
+
+  activeSources.push(source);
+}
+
+function stopPlayback() {
+  activeSources.forEach(s => { try { s.stop(); } catch (_) {} });
+  activeSources = [];
+  nextPlayTime = 0;
+}
+
+// ===== バブル UI =====
+function addBubble(text, role) {
+  const area = document.getElementById('bubbleArea');
+  const div = document.createElement('div');
+  div.className = `bubble ${role}`;
+  div.textContent = text;
+  area.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return div;
+}
+
+function updateStreamingBubble(text) {
+  if (!aiStreamBubble) {
+    aiStreamBubble = addBubble('', 'ai streaming');
+  }
+  aiStreamBubble.textContent = text;
+  aiStreamBubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function finalizeAiBubble() {
+  if (aiStreamBubble) {
+    aiStreamBubble.classList.remove('streaming');
+    aiStreamBubble = null;
+  }
+  aiStreamText = '';
+}
+
+// ===== マイク トグル（ミュート / アンミュート）=====
+function toggleMic() {
+  isMicMuted = !isMicMuted;
+  const btn = document.getElementById('btnMic');
+  if (isMicMuted) {
+    btn.textContent = '🔇';
+    btn.style.opacity = '0.6';
+    setStatus('connected', 'マイク ミュート中');
+    vadAnimate(false);
+  } else {
+    btn.textContent = '🎤';
+    btn.style.opacity = '1';
+    setStatus('connected', '');
+  }
+}
+
+// ===== テキスト入力 =====
+function sendText() {
+  const input = document.getElementById('textInput');
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  input.value = '';
+
+  addBubble(text, 'user');
+  setFaceState('thinking');
+  setStatus('connected', 'かんがえています...');
+
+  // テキストメッセージをConversationに追加してレスポンスをトリガー
+  ws.send(JSON.stringify({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text }]
+    }
+  }));
+  ws.send(JSON.stringify({ type: 'response.create' }));
+}
+
+// ===== リセット =====
+function resetChat() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  stopPlayback();
+  finalizeAiBubble();
+  document.getElementById('bubbleArea').innerHTML = '';
+  setFaceState('idle');
+  setStatus('connected', 'リセット...');
+
+  // 新しいセッション設定を再送してレスポンスをトリガー
+  ws.send(JSON.stringify({
+    type: 'session.update',
+    session: { instructions: LESSON_PROMPTS[currentLesson] }
+  }));
+  ws.send(JSON.stringify({ type: 'response.create' }));
+}
+
+// ===== 課変更 =====
+function changeLesson() {
+  currentLesson = parseInt(document.getElementById('lessonSelect').value);
+  resetChat();
+}
+
+// ===== セッション終了 =====
+function endSession() {
+  stopPlayback();
+  finalizeAiBubble();
+  if (ws) { ws.close(1000, 'ユーザー終了'); ws = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (micWorklet) { micWorklet.disconnect(); micWorklet = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  if (blinkInterval) { clearInterval(blinkInterval); blinkInterval = null; }
+
+  document.getElementById('headerBar').style.display = 'none';
+  document.getElementById('appMain').style.display = 'none';
+  document.getElementById('splash').style.display = 'flex';
+}
+
+// ===== 顔アニメーション =====
+function setFaceState(state) {
+  const mouth = document.getElementById('mouth');
+  const eyeL = document.getElementById('eyeL');
+  const eyeR = document.getElementById('eyeR');
+  mouth.className = 'mouth';
+  eyeL.className = 'eye eye-left';
+  eyeR.className = 'eye eye-right';
+  switch (state) {
+    case 'speaking': mouth.classList.add('speaking'); break;
+    case 'listening':
+      mouth.classList.add('smile');
+      eyeL.classList.add('listening');
+      eyeR.classList.add('listening');
+      break;
+    case 'thinking':
+      mouth.classList.add('thinking');
+      eyeL.classList.add('thinking');
+      eyeR.classList.add('thinking');
+      break;
+    default: mouth.classList.add('smile'); break;
+  }
+}
+
+function startBlink() {
+  if (blinkInterval) clearInterval(blinkInterval);
+  blinkInterval = setInterval(() => {
+    const mouth = document.getElementById('mouth');
+    if (mouth.classList.contains('speaking') || mouth.classList.contains('thinking')) return;
+    const eyeL = document.getElementById('eyeL');
+    const eyeR = document.getElementById('eyeR');
+    eyeL.classList.add('blink');
+    eyeR.classList.add('blink');
+    setTimeout(() => { eyeL.classList.remove('blink'); eyeR.classList.remove('blink'); }, 150);
+  }, 3000 + Math.random() * 2000);
+}
+
+// ===== VAD インジケーター =====
+let vadAnimInterval = null;
+function vadAnimate(active) {
+  const bars = ['vb1','vb2','vb3','vb4'].map(id => document.getElementById(id));
+  if (vadAnimInterval) { clearInterval(vadAnimInterval); vadAnimInterval = null; }
+  bars.forEach(b => { b.classList.remove('active'); b.style.height = '12px'; });
+  document.getElementById('vadLabel').textContent = active ? 'はなしています 🎤' : 'マイクON';
+  if (active) {
+    vadAnimInterval = setInterval(() => {
+      bars.forEach(b => {
+        b.classList.add('active');
+        b.style.height = (8 + Math.random() * 16) + 'px';
+      });
+    }, 80);
+  }
+}
+
+// ===== ステータス表示 =====
+function setStatus(state, msg) {
+  const dot = document.getElementById('connDot');
+  const text = document.getElementById('statusMsg');
+  dot.className = 'conn-dot ' + state;
+  text.textContent = msg;
+}
+
+// ===== UI 切り替え =====
+function showMainUI(lessonNum) {
+  document.getElementById('lessonSelect').value = lessonNum;
+  document.getElementById('splash').style.display = 'none';
+  document.getElementById('headerBar').style.display = 'block';
+  document.getElementById('appMain').style.display = 'block';
+  document.getElementById('btnMic').classList.remove('connected');
+  document.getElementById('btnMic').textContent = '🎤';
+  document.getElementById('btnMic').style.opacity = '1';
+  document.getElementById('bubbleArea').innerHTML = '';
+  isMicMuted = false;
+  setFaceState('idle');
+  startBlink();
+}
+
+function showSplashError(msg) {
+  alert(msg);
+}
+
+// ===== ユーティリティ =====
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+</script>
+</body>
+</html>

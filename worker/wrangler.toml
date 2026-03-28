@@ -1,0 +1,7 @@
+name = "nihongo-realtime-api"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# US リージョン配置（OpenAI APIへのアクセス最適化）
+[placement]
+mode = "smart"
