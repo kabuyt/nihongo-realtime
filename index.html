@@ -439,7 +439,7 @@ function connectWebSocket() {
         voice: 'shimmer',
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
-        input_audio_transcription: { model: 'whisper-1' },
+        input_audio_transcription: { model: 'gpt-4o-transcribe' },
         turn_detection: {
           type: 'server_vad',
           threshold: 0.5,
@@ -520,8 +520,9 @@ function handleServerEvent(msg) {
       setFaceState('thinking');
       break;
 
-    // AI 音声ストリーム（チャンク）
+    // AI 音声ストリーム（チャンク）— GA名・旧名の両方に対応
     case 'response.audio.delta':
+    case 'response.output_audio.delta':
       if (msg.delta) {
         setFaceState('speaking');
         setStatus('connected', 'はなしています...');
@@ -529,21 +530,24 @@ function handleServerEvent(msg) {
       }
       break;
 
-    // AI 音声テキスト（ストリーミング）
+    // AI 音声テキスト（ストリーミング）— GA名・旧名の両方に対応
     case 'response.audio_transcript.delta':
+    case 'response.output_audio_transcript.delta':
       if (msg.delta) {
         aiStreamText += msg.delta;
         updateStreamingBubble(aiStreamText);
       }
       break;
 
-    // AI 音声テキスト完了
+    // AI 音声テキスト完了 — GA名・旧名の両方に対応
     case 'response.audio_transcript.done':
+    case 'response.output_audio_transcript.done':
       finalizeAiBubble();
       break;
 
-    // AI テキスト（audio なし fallback）
+    // AI テキスト（audio なし fallback）— GA名・旧名の両方に対応
     case 'response.text.delta':
+    case 'response.output_text.delta':
       if (msg.delta) {
         aiStreamText += msg.delta;
         updateStreamingBubble(aiStreamText);
@@ -551,6 +555,7 @@ function handleServerEvent(msg) {
       break;
 
     case 'response.text.done':
+    case 'response.output_text.done':
       finalizeAiBubble();
       break;
 
