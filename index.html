@@ -83,6 +83,11 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 .btn-reset{width:44px;height:44px;border-radius:50%;border:none;background:#fff;color:#999;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.1)}
 .btn-reset:active{transform:scale(.9)}
 
+/* Timer */
+.timer{font-size:13px;color:rgba(255,255,255,.9);font-variant-numeric:tabular-nums;min-width:48px;text-align:center}
+.timer.warning{color:#ffe082;font-weight:bold;animation:timerPulse 1s infinite}
+@keyframes timerPulse{0%,100%{opacity:1}50%{opacity:.5}}
+
 /* Bottom spacer */
 .bottom-spacer{height:130px}
 
@@ -115,7 +120,10 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
       <option value="4">だい4か</option>
     </select>
     <h1>にほんご かいわ</h1>
-    <button class="btn-end" onclick="endSession()">おわる</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="timer" id="timerDisplay">15:00</span>
+      <button class="btn-end" onclick="endSession()">おわる</button>
+    </div>
   </div>
 </div>
 
@@ -345,6 +353,62 @@ class PCM16Processor extends AudioWorkletProcessor {
 registerProcessor('pcm16-processor', PCM16Processor);
 `;
 
+// ===== 時間制限設定 =====
+const DAILY_LIMIT_SEC = 15 * 60; // 1日15分（無料プラン）
+
+function getUsage() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('nihongo_usage') || '{}');
+    const today = new Date().toDateString();
+    if (saved.date !== today) return { date: today, seconds: 0 };
+    return saved;
+  } catch { return { date: new Date().toDateString(), seconds: 0 }; }
+}
+
+function saveUsage(seconds) {
+  const usage = getUsage();
+  usage.seconds = seconds;
+  localStorage.setItem('nihongo_usage', JSON.stringify(usage));
+}
+
+function getRemainingSeconds() {
+  return Math.max(0, DAILY_LIMIT_SEC - getUsage().seconds);
+}
+
+// タイマー表示更新
+function updateTimerDisplay(remaining) {
+  const el = document.getElementById('timerDisplay');
+  if (!el) return;
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  el.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  el.className = 'timer' + (remaining <= 60 ? ' warning' : '');
+}
+
+// タイマー（接続中だけカウント）
+let timerInterval = null;
+let sessionStartSec = 0;
+
+function startTimer() {
+  sessionStartSec = getUsage().seconds;
+  updateTimerDisplay(getRemainingSeconds());
+  timerInterval = setInterval(() => {
+    sessionStartSec++;
+    saveUsage(sessionStartSec);
+    const remaining = getRemainingSeconds();
+    updateTimerDisplay(remaining);
+    if (remaining <= 0) {
+      stopTimer();
+      addBubble('今日の無料時間（15分）が終わりました。また明日！', 'ai');
+      setTimeout(() => endSession(), 2000);
+    }
+  }, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
 // ===== State =====
 let currentLesson = 1;
 let ws = null;
@@ -365,6 +429,13 @@ let aiResponseId = null;
 
 // ===== レッスン開始（ユーザージェスチャー内で実行） =====
 async function startLesson(num) {
+  // 時間制限チェック
+  const remaining = getRemainingSeconds();
+  if (remaining <= 0) {
+    showSplashError('今日の無料時間（15分）が終わりました。また明日！');
+    return;
+  }
+
   currentLesson = num;
 
   // --- iOS AudioContext: ジェスチャー内で同期的に resume() を呼ぶ ---
@@ -451,6 +522,9 @@ function connectWebSocket() {
 
     // AIの最初のあいさつをトリガー
     ws.send(JSON.stringify({ type: 'response.create' }));
+
+    // タイマー開始
+    startTimer();
   };
 
   ws.onmessage = (event) => {
@@ -709,6 +783,7 @@ function changeLesson() {
 
 // ===== セッション終了 =====
 function endSession() {
+  stopTimer();
   stopPlayback();
   finalizeAiBubble();
   if (ws) { ws.close(1000, 'ユーザー終了'); ws = null; }
