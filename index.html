@@ -68,6 +68,7 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 .bubble.ai{background:#fff;color:#333;align-self:flex-start;border-bottom-left-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .bubble.user{background:linear-gradient(135deg,#7c4dff,#536dfe);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
 .bubble.ai.streaming{border-bottom-left-radius:18px;opacity:.85}
+.bubble.user.streaming{opacity:.85}
 
 /* Bottom input area */
 .mic-area{position:fixed;bottom:0;left:0;right:0;padding:12px 16px;background:linear-gradient(transparent,rgba(252,228,236,.97) 30%)}
@@ -202,8 +203,13 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 <script>
 // ===== 設定 =====
 // デプロイ後に Cloudflare Worker の URL を設定してください
-const WORKER_URL = 'wss://nihongo-realtime-api.kabuyt.workers.dev'; // デプロイ済み
-const MODEL = 'gpt-4o-mini-realtime-preview';
+const WORKER_URL = 'wss://nihongo-realtime-api.kabuyt.workers.dev';
+const MODEL = 'gemini-2.0-flash-live-001';
+const VOICE = 'Aoede'; // Aoede / Charon / Fenrir / Kore / Puck から選択
+
+// Gemini Live API: 入力 16kHz / 出力 24kHz の PCM16
+const INPUT_SR = 16000;
+const OUTPUT_SR = 24000;
 
 // ===== 課別システムプロンプト =====
 const LESSON_PROMPTS = {
@@ -236,7 +242,7 @@ const LESSON_PROMPTS = {
 - 学習者の間違いはやさしく直す
 - 話すスピードはゆっくり
 
-最初のあいさつ：「こんにちは！わたしは はなです。おなまえは？」`,
+会話のはじめ：会話が始まったらすぐに「こんにちは！わたしは はなです。おなまえは？」とあいさつしてください。`,
 
   2: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
 
@@ -261,7 +267,7 @@ const LESSON_PROMPTS = {
 - 学習者の間違いはやさしく直す
 - 話すスピードはゆっくり
 
-最初のあいさつ：「こんにちは！あ、それは なんですか？」`,
+会話のはじめ：会話が始まったらすぐに「こんにちは！あ、それは なんですか？」とあいさつしてください。`,
 
   3: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
 
@@ -287,7 +293,7 @@ const LESSON_PROMPTS = {
 - 学習者の間違いはやさしく直す
 - 話すスピードはゆっくり
 
-最初のあいさつ：「こんにちは！ここは がっこうですね。としょかんは どこですか？」`,
+会話のはじめ：会話が始まったらすぐに「こんにちは！ここは がっこうですね。としょかんは どこですか？」とあいさつしてください。`,
 
   4: `あなたは日本語の先生「はな」です。A1レベルの学習者と会話練習をしています。
 
@@ -314,29 +320,27 @@ const LESSON_PROMPTS = {
 - 学習者の間違いはやさしく直す
 - 話すスピードはゆっくり
 
-最初のあいさつ：「こんにちは！まいにち なんじに おきますか？」`
+会話のはじめ：会話が始まったらすぐに「こんにちは！まいにち なんじに おきますか？」とあいさつしてください。`
 };
 
-// ===== AudioWorklet プロセッサ（マイク → PCM16 変換）=====
+// ===== AudioWorklet プロセッサ（マイク → PCM16 16kHz 変換）=====
 const PCM16_PROCESSOR = `
 class PCM16Processor extends AudioWorkletProcessor {
   constructor() {
     super();
     this._buffer = new Float32Array(0);
-    // 約100ms分をバッファしてから送る (24000 * 0.1 = 2400 samples)
-    this._targetSize = 2400;
+    // 約100ms分をバッファしてから送る (16000 * 0.1 = 1600 samples)
+    this._targetSize = 1600;
   }
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
     if (!channel || channel.length === 0) return true;
 
-    // バッファに追加
     const newBuf = new Float32Array(this._buffer.length + channel.length);
     newBuf.set(this._buffer);
     newBuf.set(channel, this._buffer.length);
     this._buffer = newBuf;
 
-    // targetSize 以上たまったら送信
     while (this._buffer.length >= this._targetSize) {
       const chunk = this._buffer.slice(0, this._targetSize);
       this._buffer = this._buffer.slice(this._targetSize);
@@ -375,7 +379,6 @@ function getRemainingSeconds() {
   return Math.max(0, DAILY_LIMIT_SEC - getUsage().seconds);
 }
 
-// タイマー表示更新
 function updateTimerDisplay(remaining) {
   const el = document.getElementById('timerDisplay');
   if (!el) return;
@@ -385,7 +388,6 @@ function updateTimerDisplay(remaining) {
   el.className = 'timer' + (remaining <= 60 ? ' warning' : '');
 }
 
-// タイマー（接続中だけカウント）
 let timerInterval = null;
 let sessionStartSec = 0;
 
@@ -412,11 +414,13 @@ function stopTimer() {
 // ===== State =====
 let currentLesson = 1;
 let ws = null;
-let audioCtx = null;
+let inputAudioCtx = null;
+let outputAudioCtx = null;
 let micStream = null;
 let micWorklet = null;
 let isMicMuted = false;
 let blinkInterval = null;
+let setupSent = false;
 
 // PCM16 再生管理
 let nextPlayTime = 0;
@@ -425,11 +429,13 @@ let activeSources = [];
 // AI バブル（ストリーミング中）
 let aiStreamBubble = null;
 let aiStreamText = '';
-let aiResponseId = null;
+
+// ユーザーバブル（音声入力ストリーミング中）
+let userStreamBubble = null;
+let userStreamText = '';
 
 // ===== レッスン開始（ユーザージェスチャー内で実行） =====
 async function startLesson(num) {
-  // 時間制限チェック
   const remaining = getRemainingSeconds();
   if (remaining <= 0) {
     showSplashError('今日の無料時間（15分）が終わりました。また明日！');
@@ -438,10 +444,12 @@ async function startLesson(num) {
 
   currentLesson = num;
 
-  // --- iOS AudioContext: ジェスチャー内で同期的に resume() を呼ぶ ---
+  // iOS AudioContext: ジェスチャー内で同期的に resume() を呼ぶ
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-    audioCtx.resume(); // await しない — iOS はこの同期呼び出しでアンロックする
+    inputAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: INPUT_SR });
+    outputAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUTPUT_SR });
+    inputAudioCtx.resume();
+    outputAudioCtx.resume();
   } catch (err) {
     showSplashError('AudioContext エラー: ' + err.message);
     return;
@@ -451,35 +459,35 @@ async function startLesson(num) {
   setStatus('connecting', 'マイクを つないでいます...');
 
   try {
-    // マイク取得
     micStream = await navigator.mediaDevices.getUserMedia({ audio: {
       echoCancellation: true,
       noiseSuppression: true,
-      sampleRate: 24000,
+      sampleRate: INPUT_SR,
     }});
 
-    // AudioWorklet ロード（Blob URL 経由でインラインコードを読み込む）
     const blob = new Blob([PCM16_PROCESSOR], { type: 'application/javascript' });
     const blobUrl = URL.createObjectURL(blob);
-    await audioCtx.audioWorklet.addModule(blobUrl);
+    await inputAudioCtx.audioWorklet.addModule(blobUrl);
     URL.revokeObjectURL(blobUrl);
 
-    // マイク → WorkletNode（出力には接続しない ＝ 自分の声は再生しない）
-    const micSource = audioCtx.createMediaStreamSource(micStream);
-    micWorklet = new AudioWorkletNode(audioCtx, 'pcm16-processor');
+    const micSource = inputAudioCtx.createMediaStreamSource(micStream);
+    micWorklet = new AudioWorkletNode(inputAudioCtx, 'pcm16-processor');
     micSource.connect(micWorklet);
 
-    // WorkletNode から PCM16 チャンクを受け取り → WebSocket 送信
+    // PCM16 16kHz チャンクを Gemini realtimeInput 形式で送信
     micWorklet.port.onmessage = (event) => {
       if (isMicMuted) return;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!setupSent) return;
       const base64 = arrayBufferToBase64(event.data);
-      ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }));
+      ws.send(JSON.stringify({
+        realtimeInput: {
+          audio: { data: base64, mimeType: `audio/pcm;rate=${INPUT_SR}` }
+        }
+      }));
     };
 
-    // WebSocket 接続
     connectWebSocket();
-
   } catch (err) {
     console.error('Setup error:', err);
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -492,51 +500,47 @@ async function startLesson(num) {
 
 // ===== WebSocket 接続 =====
 function connectWebSocket() {
-  setStatus('connecting', 'OpenAI に つないでいます...');
+  setStatus('connecting', 'Gemini に つないでいます...');
+  setupSent = false;
 
-  ws = new WebSocket(`${WORKER_URL}?model=${encodeURIComponent(MODEL)}`);
+  ws = new WebSocket(WORKER_URL);
 
   ws.onopen = () => {
-    setStatus('connected', 'つながりました！');
-    document.getElementById('btnMic').classList.add('connected');
-    document.getElementById('vadIndicator').style.display = 'flex';
-
-    // セッション設定を送信
+    // Gemini Live setup メッセージ
     ws.send(JSON.stringify({
-      type: 'session.update',
-      session: {
-        modalities: ['audio', 'text'],
-        instructions: LESSON_PROMPTS[currentLesson],
-        voice: 'shimmer',
-        input_audio_format: 'pcm16',
-        output_audio_format: 'pcm16',
-        input_audio_transcription: { model: 'gpt-4o-transcribe' },
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 600,
+      setup: {
+        model: `models/${MODEL}`,
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } },
+            languageCode: 'ja-JP'
+          }
         },
+        systemInstruction: {
+          parts: [{ text: LESSON_PROMPTS[currentLesson] }]
+        },
+        outputAudioTranscription: {},
+        inputAudioTranscription: {}
       }
     }));
-
-    // AIの最初のあいさつをトリガー
-    ws.send(JSON.stringify({ type: 'response.create' }));
-
-    // タイマー開始
-    startTimer();
   };
 
-  ws.onmessage = (event) => {
+  ws.onmessage = async (event) => {
+    let raw = event.data;
+    // Gemini Worker からは Blob で来ることがある
+    if (raw instanceof Blob) {
+      raw = await raw.text();
+    }
     let msg;
-    try { msg = JSON.parse(event.data); }
-    catch { return; }
+    try { msg = JSON.parse(raw); } catch { return; }
     handleServerEvent(msg);
   };
 
   ws.onclose = (event) => {
     document.getElementById('btnMic').classList.remove('connected');
     document.getElementById('vadIndicator').style.display = 'none';
+    setupSent = false;
     if (event.code !== 1000 && event.code !== 1001) {
       setStatus('error', `切断されました (${event.code})`);
     }
@@ -550,112 +554,102 @@ function connectWebSocket() {
 
 // ===== サーバーイベント処理 =====
 function handleServerEvent(msg) {
-  switch (msg.type) {
+  // Setup 完了
+  if (msg.setupComplete) {
+    setupSent = true;
+    setStatus('connected', 'つながりました！');
+    document.getElementById('btnMic').classList.add('connected');
+    document.getElementById('vadIndicator').style.display = 'flex';
+    startTimer();
 
-    case 'session.created':
-    case 'session.updated':
-      // セッション確立 OK
-      break;
+    // 最初のあいさつをトリガー（システムプロンプトの指示通りに発話）
+    ws.send(JSON.stringify({
+      clientContent: {
+        turns: [{ role: 'user', parts: [{ text: 'はじめましょう。' }] }],
+        turnComplete: true
+      }
+    }));
+    return;
+  }
 
-    // ユーザーが話し始めた（VAD 検出）
-    case 'input_audio_buffer.speech_started':
+  // サーバーコンテンツ
+  if (msg.serverContent) {
+    const sc = msg.serverContent;
+
+    // ユーザーが AI を割り込んだ
+    if (sc.interrupted) {
+      stopPlayback();
+      finalizeAiBubble();
+      setFaceState('listening');
+      vadAnimate(true);
+    }
+
+    // ユーザー音声の文字起こし（ストリーミング）
+    if (sc.inputTranscription && sc.inputTranscription.text) {
+      userStreamText += sc.inputTranscription.text;
+      updateStreamingUserBubble(userStreamText);
       setFaceState('listening');
       setStatus('connected', 'きいています... 🎧');
       vadAnimate(true);
-      // AI の再生を中断
-      stopPlayback();
-      // 進行中のレスポンスをキャンセル
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'response.cancel' }));
-      }
-      // ストリーミング中のバブルを確定
-      finalizeAiBubble();
-      break;
+    }
 
-    // ユーザーが話し終わった（VAD 検出）
-    case 'input_audio_buffer.speech_stopped':
-      setFaceState('thinking');
-      setStatus('connected', 'かんがえています...');
+    // AI レスポンス（音声 / テキスト）
+    if (sc.modelTurn && sc.modelTurn.parts) {
+      // ユーザーバブルを確定
+      finalizeUserBubble();
       vadAnimate(false);
-      break;
 
-    // ユーザー音声の文字起こし完了
-    case 'conversation.item.input_audio_transcription.completed':
-      if (msg.transcript && msg.transcript.trim()) {
-        addBubble(msg.transcript.trim(), 'user');
+      for (const part of sc.modelTurn.parts) {
+        if (part.inlineData && part.inlineData.data) {
+          setFaceState('speaking');
+          setStatus('connected', 'はなしています...');
+          playPCM16Chunk(part.inlineData.data);
+        }
+        if (part.text) {
+          aiStreamText += part.text;
+          updateStreamingBubble(aiStreamText);
+        }
       }
-      break;
+    }
 
-    // AI レスポンス開始
-    case 'response.created':
-      aiResponseId = msg.response?.id || null;
-      aiStreamText = '';
-      aiStreamBubble = null;
-      setFaceState('thinking');
-      break;
+    // AI 音声の文字起こし（ストリーミング）
+    if (sc.outputTranscription && sc.outputTranscription.text) {
+      aiStreamText += sc.outputTranscription.text;
+      updateStreamingBubble(aiStreamText);
+    }
 
-    // AI 音声ストリーム（チャンク）— GA名・旧名の両方に対応
-    case 'response.audio.delta':
-    case 'response.output_audio.delta':
-      if (msg.delta) {
-        setFaceState('speaking');
-        setStatus('connected', 'はなしています...');
-        playPCM16Chunk(msg.delta);
-      }
-      break;
-
-    // AI 音声テキスト（ストリーミング）— GA名・旧名の両方に対応
-    case 'response.audio_transcript.delta':
-    case 'response.output_audio_transcript.delta':
-      if (msg.delta) {
-        aiStreamText += msg.delta;
-        updateStreamingBubble(aiStreamText);
-      }
-      break;
-
-    // AI 音声テキスト完了 — GA名・旧名の両方に対応
-    case 'response.audio_transcript.done':
-    case 'response.output_audio_transcript.done':
+    // ターン完了
+    if (sc.turnComplete) {
       finalizeAiBubble();
-      break;
-
-    // AI テキスト（audio なし fallback）— GA名・旧名の両方に対応
-    case 'response.text.delta':
-    case 'response.output_text.delta':
-      if (msg.delta) {
-        aiStreamText += msg.delta;
-        updateStreamingBubble(aiStreamText);
+      finalizeUserBubble();
+      // 再生中の音声がまだ残っているかもしれないので、idle は playback 終了時に設定される
+      if (activeSources.length === 0) {
+        setFaceState('idle');
+        setStatus('connected', '');
       }
-      break;
+    }
+  }
 
-    case 'response.text.done':
-    case 'response.output_text.done':
-      finalizeAiBubble();
-      break;
+  // エラー
+  if (msg.error) {
+    console.error('Gemini error:', msg.error);
+    setStatus('error', 'エラー: ' + (msg.error.message || JSON.stringify(msg.error)));
+    setFaceState('idle');
+    finalizeAiBubble();
+  }
 
-    // レスポンス完了
-    case 'response.done':
-      setFaceState('idle');
-      setStatus('connected', '');
-      break;
-
-    // エラー
-    case 'error':
-      console.error('Realtime API error:', msg.error);
-      setStatus('error', 'エラー: ' + (msg.error?.message || 'unknown'));
-      setFaceState('idle');
-      finalizeAiBubble();
-      break;
+  // GoAway（サーバーが切断予告）
+  if (msg.goAway) {
+    console.warn('Gemini goAway:', msg.goAway);
   }
 }
 
-// ===== PCM16 再生 =====
+// ===== PCM16 再生（24kHz）=====
 function playPCM16Chunk(base64) {
-  if (!audioCtx) return;
+  if (!outputAudioCtx) return;
 
-  // base64 → Int16Array → Float32Array
   const bytes = base64ToUint8(base64);
-  const int16 = new Int16Array(bytes.buffer);
+  const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) {
     float32[i] = int16[i] / 32768;
@@ -663,22 +657,21 @@ function playPCM16Chunk(base64) {
 
   if (float32.length === 0) return;
 
-  const buffer = audioCtx.createBuffer(1, float32.length, 24000);
+  const buffer = outputAudioCtx.createBuffer(1, float32.length, OUTPUT_SR);
   buffer.getChannelData(0).set(float32);
 
-  const source = audioCtx.createBufferSource();
+  const source = outputAudioCtx.createBufferSource();
   source.buffer = buffer;
-  source.connect(audioCtx.destination);
+  source.connect(outputAudioCtx.destination);
   source.onended = () => {
     activeSources = activeSources.filter(s => s !== source);
-    // 全チャンク再生完了 → idle に戻す
     if (activeSources.length === 0) {
       setFaceState('idle');
+      setStatus('connected', '');
     }
   };
 
-  // gapless 再生: 前のチャンクの終了時刻から連続再生
-  const now = audioCtx.currentTime;
+  const now = outputAudioCtx.currentTime;
   if (nextPlayTime < now) nextPlayTime = now;
   source.start(nextPlayTime);
   nextPlayTime += buffer.duration;
@@ -719,7 +712,23 @@ function finalizeAiBubble() {
   aiStreamText = '';
 }
 
-// ===== マイク トグル（ミュート / アンミュート）=====
+function updateStreamingUserBubble(text) {
+  if (!userStreamBubble) {
+    userStreamBubble = addBubble('', 'user streaming');
+  }
+  userStreamBubble.textContent = text;
+  userStreamBubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function finalizeUserBubble() {
+  if (userStreamBubble) {
+    userStreamBubble.classList.remove('streaming');
+    userStreamBubble = null;
+  }
+  userStreamText = '';
+}
+
+// ===== マイク トグル =====
 function toggleMic() {
   isMicMuted = !isMicMuted;
   const btn = document.getElementById('btnMic');
@@ -739,40 +748,36 @@ function toggleMic() {
 function sendText() {
   const input = document.getElementById('textInput');
   const text = input.value.trim();
-  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN || !setupSent) return;
   input.value = '';
 
   addBubble(text, 'user');
   setFaceState('thinking');
   setStatus('connected', 'かんがえています...');
 
-  // テキストメッセージをConversationに追加してレスポンスをトリガー
   ws.send(JSON.stringify({
-    type: 'conversation.item.create',
-    item: {
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'input_text', text }]
+    clientContent: {
+      turns: [{ role: 'user', parts: [{ text }] }],
+      turnComplete: true
     }
   }));
-  ws.send(JSON.stringify({ type: 'response.create' }));
 }
 
-// ===== リセット =====
+// ===== リセット（再接続）=====
 function resetChat() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   stopPlayback();
   finalizeAiBubble();
+  finalizeUserBubble();
   document.getElementById('bubbleArea').innerHTML = '';
   setFaceState('idle');
-  setStatus('connected', 'リセット...');
+  setStatus('connecting', 'リセット...');
 
-  // 新しいセッション設定を再送してレスポンスをトリガー
-  ws.send(JSON.stringify({
-    type: 'session.update',
-    session: { instructions: LESSON_PROMPTS[currentLesson] }
-  }));
-  ws.send(JSON.stringify({ type: 'response.create' }));
+  // Gemini Live はセッション内リセットがないので再接続する
+  if (ws) {
+    try { ws.onclose = null; ws.close(1000, 'リセット'); } catch (_) {}
+    ws = null;
+  }
+  connectWebSocket();
 }
 
 // ===== 課変更 =====
@@ -786,11 +791,14 @@ function endSession() {
   stopTimer();
   stopPlayback();
   finalizeAiBubble();
-  if (ws) { ws.close(1000, 'ユーザー終了'); ws = null; }
+  finalizeUserBubble();
+  if (ws) { try { ws.onclose = null; ws.close(1000, 'ユーザー終了'); } catch (_) {} ws = null; }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (micWorklet) { micWorklet.disconnect(); micWorklet = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  if (micWorklet) { try { micWorklet.disconnect(); } catch (_) {} micWorklet = null; }
+  if (inputAudioCtx) { try { inputAudioCtx.close(); } catch (_) {} inputAudioCtx = null; }
+  if (outputAudioCtx) { try { outputAudioCtx.close(); } catch (_) {} outputAudioCtx = null; }
   if (blinkInterval) { clearInterval(blinkInterval); blinkInterval = null; }
+  setupSent = false;
 
   document.getElementById('headerBar').style.display = 'none';
   document.getElementById('appMain').style.display = 'none';
@@ -802,6 +810,7 @@ function setFaceState(state) {
   const mouth = document.getElementById('mouth');
   const eyeL = document.getElementById('eyeL');
   const eyeR = document.getElementById('eyeR');
+  if (!mouth || !eyeL || !eyeR) return;
   mouth.className = 'mouth';
   eyeL.className = 'eye eye-left';
   eyeR.className = 'eye eye-right';
@@ -825,6 +834,7 @@ function startBlink() {
   if (blinkInterval) clearInterval(blinkInterval);
   blinkInterval = setInterval(() => {
     const mouth = document.getElementById('mouth');
+    if (!mouth) return;
     if (mouth.classList.contains('speaking') || mouth.classList.contains('thinking')) return;
     const eyeL = document.getElementById('eyeL');
     const eyeR = document.getElementById('eyeR');
@@ -839,11 +849,13 @@ let vadAnimInterval = null;
 function vadAnimate(active) {
   const bars = ['vb1','vb2','vb3','vb4'].map(id => document.getElementById(id));
   if (vadAnimInterval) { clearInterval(vadAnimInterval); vadAnimInterval = null; }
-  bars.forEach(b => { b.classList.remove('active'); b.style.height = '12px'; });
-  document.getElementById('vadLabel').textContent = active ? 'はなしています 🎤' : 'マイクON';
+  bars.forEach(b => { if (b) { b.classList.remove('active'); b.style.height = '12px'; } });
+  const lbl = document.getElementById('vadLabel');
+  if (lbl) lbl.textContent = active ? 'はなしています 🎤' : 'マイクON';
   if (active) {
     vadAnimInterval = setInterval(() => {
       bars.forEach(b => {
+        if (!b) return;
         b.classList.add('active');
         b.style.height = (8 + Math.random() * 16) + 'px';
       });

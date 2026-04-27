@@ -1,6 +1,9 @@
 // Cloudflare Worker - にほんご リアルタイム かいわ
-// OpenAI Realtime API WebSocket リレー
+// Gemini Live API WebSocket リレー
 // APIキーをブラウザから隠す中継サーバー
+
+const GEMINI_WS_HOST = 'generativelanguage.googleapis.com';
+const GEMINI_WS_PATH = '/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
 export default {
   async fetch(request, env) {
@@ -42,33 +45,30 @@ async function handleWebSocket(request, env) {
   const { 0: clientSocket, 1: serverSocket } = new WebSocketPair();
   serverSocket.accept();
 
-  // URL パラメータからモデルを取得（デフォルト: gpt-4o-mini-realtime-preview）
-  const url = new URL(request.url);
-  const model = url.searchParams.get('model') || 'gpt-4o-mini-realtime-preview';
+  if (!env.GEMINI_API_KEY) {
+    serverSocket.close(1011, 'GEMINI_API_KEY が未設定です');
+    return new Response(null, { status: 101, webSocket: clientSocket });
+  }
 
-  // OpenAI Realtime API に接続
-  let openaiSocket;
+  // Gemini Live API に接続（API キーは URL クエリで渡す）
+  const geminiUrl = `wss://${GEMINI_WS_HOST}${GEMINI_WS_PATH}?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
+
+  let geminiSocket;
   try {
-    const openaiResp = await fetch(
-      `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'realtime=v1',
-          'Upgrade': 'websocket',
-          'Connection': 'Upgrade',
-        },
-      }
-    );
+    const geminiResp = await fetch(geminiUrl, {
+      headers: {
+        'Upgrade': 'websocket',
+        'Connection': 'Upgrade',
+      },
+    });
 
-    openaiSocket = openaiResp.webSocket;
-    if (!openaiSocket) {
-      // OpenAI への接続失敗
-      const errBody = await openaiResp.text().catch(() => '(no body)');
-      serverSocket.close(1011, `OpenAI 接続失敗 (${openaiResp.status}): ${errBody.slice(0, 100)}`);
+    geminiSocket = geminiResp.webSocket;
+    if (!geminiSocket) {
+      const errBody = await geminiResp.text().catch(() => '(no body)');
+      serverSocket.close(1011, `Gemini 接続失敗 (${geminiResp.status}): ${errBody.slice(0, 100)}`);
       return new Response(null, { status: 101, webSocket: clientSocket });
     }
-    openaiSocket.accept();
+    geminiSocket.accept();
   } catch (err) {
     serverSocket.close(1011, `接続エラー: ${err.message}`);
     return new Response(null, { status: 101, webSocket: clientSocket });
@@ -76,43 +76,43 @@ async function handleWebSocket(request, env) {
 
   // ===== 双方向リレー =====
 
-  // クライアント → OpenAI
+  // クライアント → Gemini
   serverSocket.addEventListener('message', (event) => {
     try {
-      if (openaiSocket.readyState === 1 /* OPEN */) {
-        openaiSocket.send(event.data);
+      if (geminiSocket.readyState === 1 /* OPEN */) {
+        geminiSocket.send(event.data);
       }
     } catch (err) {
-      console.error('Client→OpenAI relay error:', err);
+      console.error('Client→Gemini relay error:', err);
     }
   });
 
-  // OpenAI → クライアント
-  openaiSocket.addEventListener('message', (event) => {
+  // Gemini → クライアント
+  geminiSocket.addEventListener('message', (event) => {
     try {
       if (serverSocket.readyState === 1 /* OPEN */) {
         serverSocket.send(event.data);
       }
     } catch (err) {
-      console.error('OpenAI→Client relay error:', err);
+      console.error('Gemini→Client relay error:', err);
     }
   });
 
   // クローズハンドリング
   serverSocket.addEventListener('close', (event) => {
-    try { openaiSocket.close(event.code || 1000, event.reason || 'クライアント切断'); } catch (_) {}
+    try { geminiSocket.close(event.code || 1000, event.reason || 'クライアント切断'); } catch (_) {}
   });
 
-  openaiSocket.addEventListener('close', (event) => {
-    try { serverSocket.close(event.code || 1000, event.reason || 'OpenAI 切断'); } catch (_) {}
+  geminiSocket.addEventListener('close', (event) => {
+    try { serverSocket.close(event.code || 1000, event.reason || 'Gemini 切断'); } catch (_) {}
   });
 
   serverSocket.addEventListener('error', () => {
-    try { openaiSocket.close(1011, 'クライアントエラー'); } catch (_) {}
+    try { geminiSocket.close(1011, 'クライアントエラー'); } catch (_) {}
   });
 
-  openaiSocket.addEventListener('error', () => {
-    try { serverSocket.close(1011, 'OpenAI エラー'); } catch (_) {}
+  geminiSocket.addEventListener('error', () => {
+    try { serverSocket.close(1011, 'Gemini エラー'); } catch (_) {}
   });
 
   return new Response(null, { status: 101, webSocket: clientSocket });
