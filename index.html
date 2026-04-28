@@ -204,7 +204,7 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 // ===== 設定 =====
 // デプロイ後に Cloudflare Worker の URL を設定してください
 const WORKER_URL = 'wss://nihongo-realtime-api.kabuyt.workers.dev';
-const MODEL = 'gemini-2.0-flash-live-001';
+const MODEL = 'models/gemini-2.5-flash-native-audio-latest';
 const VOICE = 'Aoede'; // Aoede / Charon / Fenrir / Kore / Puck から選択
 
 // Gemini Live API: 入力 16kHz / 出力 24kHz の PCM16
@@ -509,19 +509,22 @@ function connectWebSocket() {
     // Gemini Live setup メッセージ
     ws.send(JSON.stringify({
       setup: {
-        model: `models/${MODEL}`,
+        model: MODEL,
         generationConfig: {
           responseModalities: ['AUDIO'],
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } },
-            languageCode: 'ja-JP'
-          }
+            languageCode: 'ja-JP',
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } }
+          },
+          temperature: 0.7,
+          maxOutputTokens: 200,
+          thinkingConfig: { thinkingBudget: 0 }
         },
         systemInstruction: {
           parts: [{ text: LESSON_PROMPTS[currentLesson] }]
         },
-        outputAudioTranscription: {},
-        inputAudioTranscription: {}
+        inputAudioTranscription: {},
+        outputAudioTranscription: {}
       }
     }));
   };
