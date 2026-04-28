@@ -715,11 +715,19 @@ function finalizeAiBubble() {
   aiStreamText = '';
 }
 
+// Gemini の文字起こしが日本語音声をハングルと誤認識することがあるため、表示時に除去
+const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF]+/g;
+function cleanTranscript(text) {
+  return text.replace(HANGUL_RE, '').replace(/\s+/g, ' ').trim();
+}
+
 function updateStreamingUserBubble(text) {
+  const cleaned = cleanTranscript(text);
+  if (!cleaned) return; // 全部ハングルなら表示しない
   if (!userStreamBubble) {
     userStreamBubble = addBubble('', 'user streaming');
   }
-  userStreamBubble.textContent = text;
+  userStreamBubble.textContent = cleaned;
   userStreamBubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
