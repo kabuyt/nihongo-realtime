@@ -28,7 +28,7 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 .character-area{display:flex;flex-direction:column;align-items:center;padding:8px 0;position:fixed;top:48px;left:0;right:0;z-index:9;background:linear-gradient(180deg,#fce4ec 0%,#fce4ec 80%,rgba(252,228,236,0) 100%);pointer-events:none}
 .character-area > *{pointer-events:auto}
 .live2d-wrap{width:200px;height:220px;display:flex;align-items:center;justify-content:center;position:relative}
-.live2d-wrap canvas{width:100%;height:100%;display:block}
+.live2d-wrap canvas{width:100% !important;height:100% !important;display:block}
 .live2d-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:13px;color:#999}
 .face{width:150px;height:150px;background:linear-gradient(135deg,#ffe0b2,#ffcc80);border-radius:50%;position:relative;box-shadow:0 8px 25px rgba(0,0,0,.15);border:4px solid #fff}
 .eye{position:absolute;width:20px;height:24px;background:#333;border-radius:50%;top:50px}
@@ -483,8 +483,10 @@ async function initLive2D() {
       backgroundAlpha: 0,
       width: canvas.width,
       height: canvas.height,
-      resolution: window.devicePixelRatio || 1,
-      autoDensity: true,
+      // autoDensity を有効にすると canvas.style.width をインラインで上書きしてレイアウトが崩れる
+      // CSS の `.live2d-wrap canvas { width:100%; height:100%; }` でサイズ制御するため無効化
+      resolution: 1,
+      autoDensity: false,
     });
 
     live2dModel = await PIXI.live2d.Live2DModel.from(HIYORI_MODEL_URL, {
