@@ -30,6 +30,8 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 .live2d-wrap{width:200px;height:220px;display:flex;align-items:center;justify-content:center;position:relative}
 .live2d-wrap canvas{width:100% !important;height:100% !important;display:block}
 .live2d-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:13px;color:#999}
+.splash-character{width:200px;height:220px;margin-bottom:20px;position:relative;display:flex;align-items:center;justify-content:center}
+.splash-character canvas{width:100% !important;height:100% !important;display:block}
 .face{width:150px;height:150px;background:linear-gradient(135deg,#ffe0b2,#ffcc80);border-radius:50%;position:relative;box-shadow:0 8px 25px rgba(0,0,0,.15);border:4px solid #fff}
 .eye{position:absolute;width:20px;height:24px;background:#333;border-radius:50%;top:50px}
 .eye-left{left:38px}
@@ -176,12 +178,9 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 
 <!-- Splash Screen -->
 <div id="splash" class="splash">
-  <div class="face" style="width:120px;height:120px;margin-bottom:20px">
-    <div class="eye eye-left" style="top:40px;left:30px;width:16px;height:20px"><div class="eye-shine" style="width:6px;height:6px"></div></div>
-    <div class="eye eye-right" style="top:40px;right:30px;width:16px;height:20px"><div class="eye-shine" style="width:6px;height:6px"></div></div>
-    <div class="blush blush-left" style="top:58px;left:16px;width:18px;height:12px"></div>
-    <div class="blush blush-right" style="top:58px;right:16px;width:18px;height:12px"></div>
-    <div class="mouth smile" style="bottom:28px;width:28px"></div>
+  <div class="splash-character">
+    <canvas id="live2dCanvasSplash" width="560" height="640"></canvas>
+    <div class="live2d-loading" id="live2dLoadingSplash">よみこんでいます...</div>
   </div>
   <div class="realtime-badge">⚡ リアルタイム AI かいわ</div>
   <h2>にほんご かいわ れんしゅう</h2>
@@ -436,6 +435,8 @@ let setupSent = false;
 // Live2D
 let live2dApp = null;
 let live2dModel = null;
+let splashLive2dApp = null;
+let splashLive2dModel = null;
 let audioAnalyser = null;
 let lipSyncRAF = null;
 const HIYORI_MODEL_URL = 'https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json';
@@ -448,15 +449,20 @@ window.LIVE2D_CFG = {
   offsetY: -40,         // 縦方向の微調整（-でモデル上方向、下半身は画面外へ）
 };
 function applyLive2DLayout() {
-  if (!live2dModel) return;
+  applyLayoutTo(live2dModel, 'live2dCanvas');
+  applyLayoutTo(splashLive2dModel, 'live2dCanvasSplash');
+}
+function applyLayoutTo(model, canvasId) {
+  if (!model) return;
   const cfg = window.LIVE2D_CFG;
-  const canvas = document.getElementById('live2dCanvas');
-  if (live2dModel.anchor && typeof live2dModel.anchor.set === 'function') {
-    live2dModel.anchor.set(0.5, cfg.anchorY);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (model.anchor && typeof model.anchor.set === 'function') {
+    model.anchor.set(0.5, cfg.anchorY);
   }
-  live2dModel.scale.set(cfg.scale);
-  live2dModel.x = canvas.width / 2 + cfg.offsetX;
-  live2dModel.y = canvas.height / 2 + cfg.offsetY;
+  model.scale.set(cfg.scale);
+  model.x = canvas.width / 2 + cfg.offsetX;
+  model.y = canvas.height / 2 + cfg.offsetY;
 }
 window.applyLive2DLayout = applyLive2DLayout;
 
@@ -471,6 +477,40 @@ let aiStreamText = '';
 // ユーザーバブル（音声入力ストリーミング中）
 let userStreamBubble = null;
 let userStreamText = '';
+
+// ===== スプラッシュ用 Live2D（音声なし、表示だけ）=====
+async function initSplashLive2D() {
+  if (splashLive2dModel) return;
+  const canvas = document.getElementById('live2dCanvasSplash');
+  if (!canvas || !window.PIXI || !window.PIXI.live2d) return;
+  try {
+    splashLive2dApp = new PIXI.Application({
+      view: canvas,
+      autoStart: true,
+      backgroundAlpha: 0,
+      width: canvas.width,
+      height: canvas.height,
+      resolution: 1,
+      autoDensity: false,
+    });
+    splashLive2dModel = await PIXI.live2d.Live2DModel.from(HIYORI_MODEL_URL, {
+      autoInteract: false,
+    });
+    splashLive2dApp.stage.addChild(splashLive2dModel);
+    applyLayoutTo(splashLive2dModel, 'live2dCanvasSplash');
+    const loading = document.getElementById('live2dLoadingSplash');
+    if (loading) loading.style.display = 'none';
+  } catch (err) {
+    console.error('Splash Live2D error:', err);
+  }
+}
+
+// ページロード後すぐに スプラッシュにひよりちゃんを表示
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initSplashLive2D);
+} else {
+  initSplashLive2D();
+}
 
 // ===== Live2D 初期化 =====
 async function initLive2D() {
