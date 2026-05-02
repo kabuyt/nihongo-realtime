@@ -6,6 +6,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#ff6b9d">
 <title>にほんご リアルタイム かいわ</title>
+
+<!-- Live2D SDK -->
+<script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:linear-gradient(135deg,#fce4ec,#e8eaf6);min-height:100vh;color:#333;overflow-x:hidden}
@@ -19,7 +25,10 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 .btn-end{background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);border-radius:20px;color:#fff;padding:6px 12px;font-size:13px;cursor:pointer}
 
 /* Character */
-.character-area{display:flex;flex-direction:column;align-items:center;padding:30px 0 10px}
+.character-area{display:flex;flex-direction:column;align-items:center;padding:10px 0}
+.live2d-wrap{width:280px;height:320px;display:flex;align-items:center;justify-content:center;position:relative}
+.live2d-wrap canvas{width:100%;height:100%;display:block}
+.live2d-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:13px;color:#999}
 .face{width:150px;height:150px;background:linear-gradient(135deg,#ffe0b2,#ffcc80);border-radius:50%;position:relative;box-shadow:0 8px 25px rgba(0,0,0,.15);border:4px solid #fff}
 .eye{position:absolute;width:20px;height:24px;background:#333;border-radius:50%;top:50px}
 .eye-left{left:38px}
@@ -131,12 +140,9 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 <!-- Main App -->
 <div id="appMain" style="display:none">
   <div class="character-area">
-    <div class="face" id="face">
-      <div class="eye eye-left" id="eyeL"><div class="eye-shine"></div></div>
-      <div class="eye eye-right" id="eyeR"><div class="eye-shine"></div></div>
-      <div class="blush blush-left"></div>
-      <div class="blush blush-right"></div>
-      <div class="mouth smile" id="mouth"></div>
+    <div class="live2d-wrap" id="live2dWrap">
+      <canvas id="live2dCanvas" width="560" height="640"></canvas>
+      <div class="live2d-loading" id="live2dLoading">よみこんでいます...</div>
     </div>
     <div class="status-text" id="statusText">
       <span class="conn-dot" id="connDot"></span>
@@ -422,6 +428,13 @@ let isMicMuted = false;
 let blinkInterval = null;
 let setupSent = false;
 
+// Live2D
+let live2dApp = null;
+let live2dModel = null;
+let audioAnalyser = null;
+let lipSyncRAF = null;
+const HIYORI_MODEL_URL = 'https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json';
+
 // PCM16 再生管理
 let nextPlayTime = 0;
 let activeSources = [];
@@ -433,6 +446,78 @@ let aiStreamText = '';
 // ユーザーバブル（音声入力ストリーミング中）
 let userStreamBubble = null;
 let userStreamText = '';
+
+// ===== Live2D 初期化 =====
+async function initLive2D() {
+  if (live2dModel) return;
+  const canvas = document.getElementById('live2dCanvas');
+  if (!canvas || !window.PIXI || !window.PIXI.live2d) {
+    console.warn('Live2D libs not ready');
+    return;
+  }
+  try {
+    live2dApp = new PIXI.Application({
+      view: canvas,
+      autoStart: true,
+      backgroundAlpha: 0,
+      width: canvas.width,
+      height: canvas.height,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    });
+
+    live2dModel = await PIXI.live2d.Live2DModel.from(HIYORI_MODEL_URL, {
+      autoInteract: false,
+    });
+    live2dApp.stage.addChild(live2dModel);
+
+    // モデルをキャンバスにフィット（Hiyori は大きめなので 0.18 程度）
+    const scale = Math.min(canvas.width / live2dModel.width, canvas.height / live2dModel.height) * 0.95;
+    live2dModel.scale.set(scale);
+    live2dModel.x = canvas.width / 2 - (live2dModel.width * scale) / 2;
+    live2dModel.y = canvas.height / 2 - (live2dModel.height * scale) / 2;
+
+    const loadingEl = document.getElementById('live2dLoading');
+    if (loadingEl) loadingEl.style.display = 'none';
+  } catch (err) {
+    console.error('Live2D init error:', err);
+    const loadingEl = document.getElementById('live2dLoading');
+    if (loadingEl) loadingEl.textContent = 'Live2D 読み込み失敗: ' + err.message;
+  }
+}
+
+// ===== リップシンク =====
+function setupLipSync() {
+  if (!outputAudioCtx || audioAnalyser) return;
+  audioAnalyser = outputAudioCtx.createAnalyser();
+  audioAnalyser.fftSize = 256;
+  audioAnalyser.smoothingTimeConstant = 0.3;
+  audioAnalyser.connect(outputAudioCtx.destination);
+
+  const data = new Uint8Array(audioAnalyser.fftSize);
+  const tick = () => {
+    if (audioAnalyser && live2dModel) {
+      audioAnalyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const mouthOpen = Math.min(1, rms * 8);
+      try {
+        live2dModel.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', mouthOpen);
+      } catch (_) {}
+    }
+    lipSyncRAF = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function stopLipSync() {
+  if (lipSyncRAF) { cancelAnimationFrame(lipSyncRAF); lipSyncRAF = null; }
+  audioAnalyser = null;
+}
 
 // ===== レッスン開始（ユーザージェスチャー内で実行） =====
 async function startLesson(num) {
@@ -457,6 +542,10 @@ async function startLesson(num) {
 
   showMainUI(num);
   setStatus('connecting', 'マイクを つないでいます...');
+
+  // Live2D & リップシンク 初期化（並列）
+  initLive2D();
+  setupLipSync();
 
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: {
@@ -665,7 +754,8 @@ function playPCM16Chunk(base64) {
 
   const source = outputAudioCtx.createBufferSource();
   source.buffer = buffer;
-  source.connect(outputAudioCtx.destination);
+  // Analyser 経由で再生（リップシンク用に音量を取得）
+  source.connect(audioAnalyser || outputAudioCtx.destination);
   source.onended = () => {
     activeSources = activeSources.filter(s => s !== source);
     if (activeSources.length === 0) {
@@ -801,6 +891,7 @@ function changeLesson() {
 function endSession() {
   stopTimer();
   stopPlayback();
+  stopLipSync();
   finalizeAiBubble();
   finalizeUserBubble();
   if (ws) { try { ws.onclose = null; ws.close(1000, 'ユーザー終了'); } catch (_) {} ws = null; }
