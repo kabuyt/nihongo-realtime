@@ -17,7 +17,7 @@
 body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:linear-gradient(135deg,#fce4ec,#e8eaf6);min-height:100vh;color:#333;overflow-x:hidden}
 
 /* Header */
-.header{background:linear-gradient(135deg,#ff6b9d,#c084fc);color:#fff;padding:12px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+.header{background:linear-gradient(135deg,#ff6b9d,#c084fc);color:#fff;padding:12px 16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.15);position:sticky;top:0;z-index:10}
 .header h1{font-size:18px;letter-spacing:1px}
 .header-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .lesson-select{background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);border-radius:20px;color:#fff;padding:6px 14px;font-size:14px;font-weight:bold;cursor:pointer;-webkit-appearance:none}
@@ -25,8 +25,8 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 .btn-end{background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);border-radius:20px;color:#fff;padding:6px 12px;font-size:13px;cursor:pointer}
 
 /* Character */
-.character-area{display:flex;flex-direction:column;align-items:center;padding:10px 0}
-.live2d-wrap{width:280px;height:320px;display:flex;align-items:center;justify-content:center;position:relative}
+.character-area{display:flex;flex-direction:column;align-items:center;padding:8px 0;position:sticky;top:48px;z-index:9;background:linear-gradient(180deg,#fce4ec 0%,#fce4ec 75%,rgba(252,228,236,0) 100%)}
+.live2d-wrap{width:200px;height:220px;display:flex;align-items:center;justify-content:center;position:relative}
 .live2d-wrap canvas{width:100%;height:100%;display:block}
 .live2d-loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:13px;color:#999}
 .face{width:150px;height:150px;background:linear-gradient(135deg,#ffe0b2,#ffcc80);border-radius:50%;position:relative;box-shadow:0 8px 25px rgba(0,0,0,.15);border:4px solid #fff}
@@ -471,14 +471,17 @@ async function initLive2D() {
     });
     live2dApp.stage.addChild(live2dModel);
 
+    // anchor を中心に → 位置を canvas 中央へ
+    if (live2dModel.anchor && typeof live2dModel.anchor.set === 'function') {
+      live2dModel.anchor.set(0.5, 0.5);
+    }
     // 内部寸法（scale=1時）で fit 計算
     const intrinsicW = live2dModel.internalModel.width || live2dModel.width;
     const intrinsicH = live2dModel.internalModel.height || live2dModel.height;
-    const scale = Math.min(canvas.width / intrinsicW, canvas.height / intrinsicH) * 0.95;
+    const scale = Math.min(canvas.width / intrinsicW, canvas.height / intrinsicH) * 0.9;
     live2dModel.scale.set(scale);
-    // 中央配置（model.width/height は scale 反映後の表示サイズ）
-    live2dModel.x = (canvas.width - live2dModel.width) / 2;
-    live2dModel.y = (canvas.height - live2dModel.height) / 2;
+    live2dModel.x = canvas.width / 2;
+    live2dModel.y = canvas.height / 2;
     console.log('[Live2D] loaded', { intrinsicW, intrinsicH, scale, w: live2dModel.width, h: live2dModel.height });
 
     const loadingEl = document.getElementById('live2dLoading');
