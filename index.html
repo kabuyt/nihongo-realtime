@@ -875,15 +875,16 @@ function finalizeAiBubble() {
   aiStreamText = '';
 }
 
-// Gemini の文字起こしが日本語音声をハングルと誤認識することがあるため、表示時に除去
-const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF]+/g;
+// Gemini の音声文字起こしは自動言語判定で、日本語を韓国語/シンハラ語/タイ語等に
+// 誤認識することがあるため、日本語表示に必要な範囲だけ残して他は除去する
+const NON_JAPANESE_RE = /[^ -~\u00A0-\u00FF\u2000-\u206F\u3000-\u30FF\u31F0-\u31FF\u4E00-\u9FFF\uFF00-\uFFEF]+/g;
 function cleanTranscript(text) {
-  return text.replace(HANGUL_RE, '').replace(/\s+/g, ' ').trim();
+  return text.replace(NON_JAPANESE_RE, '').replace(/\s+/g, ' ').trim();
 }
 
 function updateStreamingUserBubble(text) {
   const cleaned = cleanTranscript(text);
-  if (!cleaned) return; // 全部ハングルなら表示しない
+  if (!cleaned) return; // 全部 非日本語 なら表示しない
   if (!userStreamBubble) {
     userStreamBubble = addBubble('', 'user streaming');
   }
