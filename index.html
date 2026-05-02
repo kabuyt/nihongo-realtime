@@ -471,11 +471,15 @@ async function initLive2D() {
     });
     live2dApp.stage.addChild(live2dModel);
 
-    // モデルをキャンバスにフィット（Hiyori は大きめなので 0.18 程度）
-    const scale = Math.min(canvas.width / live2dModel.width, canvas.height / live2dModel.height) * 0.95;
+    // 内部寸法（scale=1時）で fit 計算
+    const intrinsicW = live2dModel.internalModel.width || live2dModel.width;
+    const intrinsicH = live2dModel.internalModel.height || live2dModel.height;
+    const scale = Math.min(canvas.width / intrinsicW, canvas.height / intrinsicH) * 0.95;
     live2dModel.scale.set(scale);
-    live2dModel.x = canvas.width / 2 - (live2dModel.width * scale) / 2;
-    live2dModel.y = canvas.height / 2 - (live2dModel.height * scale) / 2;
+    // 中央配置（model.width/height は scale 反映後の表示サイズ）
+    live2dModel.x = (canvas.width - live2dModel.width) / 2;
+    live2dModel.y = (canvas.height - live2dModel.height) / 2;
+    console.log('[Live2D] loaded', { intrinsicW, intrinsicH, scale, w: live2dModel.width, h: live2dModel.height });
 
     const loadingEl = document.getElementById('live2dLoading');
     if (loadingEl) loadingEl.style.display = 'none';
