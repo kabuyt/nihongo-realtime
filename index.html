@@ -435,6 +435,26 @@ let audioAnalyser = null;
 let lipSyncRAF = null;
 const HIYORI_MODEL_URL = 'https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json';
 
+// === ひよりちゃんの表示調整パラメータ（DevTools コンソールから window.LIVE2D_CFG.scale = ... で動的調整可能） ===
+window.LIVE2D_CFG = {
+  scale: 0.13,          // モデルのサイズ（小さく:0.08〜大きく:0.25）
+  anchorY: 0.18,        // モデル内のどの位置を中心とするか（0=頭、0.5=おなか、1=足）
+  offsetX: 0,           // 横方向の微調整（-50 〜 +50 px）
+  offsetY: 0,           // 縦方向の微調整
+};
+function applyLive2DLayout() {
+  if (!live2dModel) return;
+  const cfg = window.LIVE2D_CFG;
+  const canvas = document.getElementById('live2dCanvas');
+  if (live2dModel.anchor && typeof live2dModel.anchor.set === 'function') {
+    live2dModel.anchor.set(0.5, cfg.anchorY);
+  }
+  live2dModel.scale.set(cfg.scale);
+  live2dModel.x = canvas.width / 2 + cfg.offsetX;
+  live2dModel.y = canvas.height / 2 + cfg.offsetY;
+}
+window.applyLive2DLayout = applyLive2DLayout;
+
 // PCM16 再生管理
 let nextPlayTime = 0;
 let activeSources = [];
@@ -471,18 +491,14 @@ async function initLive2D() {
     });
     live2dApp.stage.addChild(live2dModel);
 
-    // anchor を中心に → 位置を canvas 中央へ
-    if (live2dModel.anchor && typeof live2dModel.anchor.set === 'function') {
-      live2dModel.anchor.set(0.5, 0.5);
-    }
-    // 内部寸法（scale=1時）で fit 計算
-    const intrinsicW = live2dModel.internalModel.width || live2dModel.width;
-    const intrinsicH = live2dModel.internalModel.height || live2dModel.height;
-    const scale = Math.min(canvas.width / intrinsicW, canvas.height / intrinsicH) * 0.9;
-    live2dModel.scale.set(scale);
-    live2dModel.x = canvas.width / 2;
-    live2dModel.y = canvas.height / 2;
-    console.log('[Live2D] loaded', { intrinsicW, intrinsicH, scale, w: live2dModel.width, h: live2dModel.height });
+    applyLive2DLayout();
+    console.log('[Live2D] loaded', {
+      cfg: window.LIVE2D_CFG,
+      intrinsicW: live2dModel.internalModel?.width,
+      intrinsicH: live2dModel.internalModel?.height,
+      renderedW: live2dModel.width,
+      renderedH: live2dModel.height,
+    });
 
     const loadingEl = document.getElementById('live2dLoading');
     if (loadingEl) loadingEl.style.display = 'none';
