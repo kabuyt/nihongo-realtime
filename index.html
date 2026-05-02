@@ -365,6 +365,7 @@ registerProcessor('pcm16-processor', PCM16Processor);
 `;
 
 // ===== 時間制限設定 =====
+const TIMER_ENABLED = false; // 検証中は false。本番配布前に true に戻すこと
 const DAILY_LIMIT_SEC = 15 * 60; // 1日15分（無料プラン）
 
 function getUsage() {
@@ -383,12 +384,14 @@ function saveUsage(seconds) {
 }
 
 function getRemainingSeconds() {
+  if (!TIMER_ENABLED) return Number.POSITIVE_INFINITY;
   return Math.max(0, DAILY_LIMIT_SEC - getUsage().seconds);
 }
 
 function updateTimerDisplay(remaining) {
   const el = document.getElementById('timerDisplay');
   if (!el) return;
+  if (!TIMER_ENABLED) { el.textContent = '∞'; el.className = 'timer'; return; }
   const m = Math.floor(remaining / 60);
   const s = remaining % 60;
   el.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
@@ -401,6 +404,7 @@ let sessionStartSec = 0;
 function startTimer() {
   sessionStartSec = getUsage().seconds;
   updateTimerDisplay(getRemainingSeconds());
+  if (!TIMER_ENABLED) return; // タイマー無効時はカウント停止
   timerInterval = setInterval(() => {
     sessionStartSec++;
     saveUsage(sessionStartSec);
