@@ -438,10 +438,10 @@ const HIYORI_MODEL_URL = 'https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@de
 
 // === ひよりちゃんの表示調整パラメータ（DevTools コンソールから window.LIVE2D_CFG.scale = ... で動的調整可能） ===
 window.LIVE2D_CFG = {
-  scale: 0.13,          // モデルのサイズ（小さく:0.08〜大きく:0.25）
-  anchorY: 0.18,        // モデル内のどの位置を中心とするか（0=頭、0.5=おなか、1=足）
+  scale: 0.40,          // モデルのサイズ（バストアップ:0.40〜0.55）
+  anchorY: 0.15,        // モデル内のどの位置を中心とするか（0=頭、0.5=おなか、1=足）
   offsetX: 0,           // 横方向の微調整（-50 〜 +50 px）
-  offsetY: 0,           // 縦方向の微調整
+  offsetY: -40,         // 縦方向の微調整（-でモデル上方向、下半身は画面外へ）
 };
 function applyLive2DLayout() {
   if (!live2dModel) return;
