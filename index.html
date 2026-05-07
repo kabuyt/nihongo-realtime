@@ -704,7 +704,9 @@ function connectWebSocket() {
     document.getElementById('vadIndicator').style.display = 'none';
     setupSent = false;
     if (event.code !== 1000 && event.code !== 1001) {
-      setStatus('error', `切断されました (${event.code})`);
+      const reason = event.reason ? ` ${event.reason}` : '';
+      console.error('[WS close]', event.code, event.reason);
+      setStatus('error', `切断 (${event.code})${reason}`);
     }
     ws = null;
   };
