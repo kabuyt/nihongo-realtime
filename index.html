@@ -441,9 +441,10 @@ let audioAnalyser = null;
 let lipSyncRAF = null;
 
 // 切替可能な Live2D 公式サンプルモデル一覧
-// DevTools コンソールで `switchLive2DModel('mark')` 等で切り替え可能
+// DevTools コンソールで `switchLive2DModel('simple')` 等で切り替え可能
 const SAMPLE_BASE = 'https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources';
 window.LIVE2D_MODELS = {
+  simple: 'models/simple/simple.model3.json',           // シンプルモデル（学習用、絵柄ミニマル）
   natori: `${SAMPLE_BASE}/Natori/Natori.model3.json`,   // 大人の女性・落ち着いた絵柄
   mark:   `${SAMPLE_BASE}/Mark/Mark.model3.json`,       // 中性的な青年・リアル寄り
   mao:    `${SAMPLE_BASE}/Mao/Mao.model3.json`,         // 黒髪・清楚系
@@ -453,7 +454,7 @@ window.LIVE2D_MODELS = {
 
 // === 表示調整パラメータ（DevTools コンソールから window.LIVE2D_CFG.scale = ... で動的調整可能） ===
 window.LIVE2D_CFG = {
-  modelUrl: window.LIVE2D_MODELS.natori, // 使うモデル（natori/mark/mao/haru/hiyori）
+  modelUrl: window.LIVE2D_MODELS.simple, // 使うモデル（simple/natori/mark/mao/haru/hiyori）
   scale: 0.40,          // モデルのサイズ（バストアップ:0.40〜0.55）
   anchorY: 0.15,        // モデル内のどの位置を中心とするか（0=頭、0.5=おなか、1=足）
   offsetX: 0,           // 横方向の微調整（-50 〜 +50 px）
@@ -619,7 +620,9 @@ function setupLipSync() {
       const rms = Math.sqrt(sum / data.length);
       const mouthOpen = Math.min(1, rms * 8);
       try {
+        // モデルにより口パラメータの ID 命名規則が違う（CamelCase / SNAKE_CASE）ので両方設定
         live2dModel.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', mouthOpen);
+        live2dModel.internalModel.coreModel.setParameterValueById('PARAM_MOUTH_OPEN_Y', mouthOpen);
       } catch (_) {}
     }
     lipSyncRAF = requestAnimationFrame(tick);
