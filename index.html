@@ -442,23 +442,26 @@ let lipSyncRAF = null;
 
 // 切替可能な Live2D 公式サンプルモデル一覧
 // DevTools コンソールで `switchLive2DModel('simple')` 等で切り替え可能
+// モデルごとに最適な scale/anchorY/offsetY をプリセットで持つ
 const SAMPLE_BASE = 'https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources';
 window.LIVE2D_MODELS = {
-  simple: 'models/simple/simple.model3.json',           // シンプルモデル（学習用、絵柄ミニマル）
-  natori: `${SAMPLE_BASE}/Natori/Natori.model3.json`,   // 大人の女性・落ち着いた絵柄
-  mark:   `${SAMPLE_BASE}/Mark/Mark.model3.json`,       // 中性的な青年・リアル寄り
-  mao:    `${SAMPLE_BASE}/Mao/Mao.model3.json`,         // 黒髪・清楚系
-  haru:   `${SAMPLE_BASE}/Haru/Haru.model3.json`,       // 明るい女子学生
-  hiyori: `${SAMPLE_BASE}/Hiyori/Hiyori.model3.json`,   // 元のキャラ（萌え系）
+  simple: { url: 'models/simple/simple.model3.json',         scale: 0.85, anchorY: 0.50, offsetY: 0,   note: 'シンプルモデル（学習用、顔だけ）' },
+  natori: { url: `${SAMPLE_BASE}/Natori/Natori.model3.json`, scale: 0.40, anchorY: 0.15, offsetY: -40, note: '大人の女性・落ち着いた' },
+  mark:   { url: `${SAMPLE_BASE}/Mark/Mark.model3.json`,     scale: 0.40, anchorY: 0.15, offsetY: -40, note: '中性的な青年・リアル寄り' },
+  mao:    { url: `${SAMPLE_BASE}/Mao/Mao.model3.json`,       scale: 0.40, anchorY: 0.15, offsetY: -40, note: '黒髪・清楚系' },
+  haru:   { url: `${SAMPLE_BASE}/Haru/Haru.model3.json`,     scale: 0.40, anchorY: 0.15, offsetY: -40, note: '明るい女子学生' },
+  hiyori: { url: `${SAMPLE_BASE}/Hiyori/Hiyori.model3.json`, scale: 0.40, anchorY: 0.15, offsetY: -40, note: '元の萌え系' },
 };
 
 // === 表示調整パラメータ（DevTools コンソールから window.LIVE2D_CFG.scale = ... で動的調整可能） ===
+// 初期値は LIVE2D_MODELS.simple のプリセットから読み込む
+const _initialModel = window.LIVE2D_MODELS.simple;
 window.LIVE2D_CFG = {
-  modelUrl: window.LIVE2D_MODELS.simple, // 使うモデル（simple/natori/mark/mao/haru/hiyori）
-  scale: 0.40,          // モデルのサイズ（バストアップ:0.40〜0.55）
-  anchorY: 0.15,        // モデル内のどの位置を中心とするか（0=頭、0.5=おなか、1=足）
-  offsetX: 0,           // 横方向の微調整（-50 〜 +50 px）
-  offsetY: -40,         // 縦方向の微調整（-でモデル上方向、下半身は画面外へ）
+  modelUrl: _initialModel.url,
+  scale: _initialModel.scale,
+  anchorY: _initialModel.anchorY,
+  offsetX: 0,
+  offsetY: _initialModel.offsetY,
 };
 function applyLive2DLayout() {
   applyLayoutTo(live2dModel, 'live2dCanvas');
@@ -481,9 +484,16 @@ window.applyLive2DLayout = applyLive2DLayout;
 // === モデル切替（リロードなしで即時反映）===
 // 使い方: switchLive2DModel('mark') / switchLive2DModel('natori') / switchLive2DModel('hiyori') 等
 async function switchLive2DModel(nameOrUrl) {
-  const url = window.LIVE2D_MODELS[nameOrUrl] || nameOrUrl;
+  const preset = window.LIVE2D_MODELS[nameOrUrl];
+  const url = preset ? preset.url : nameOrUrl;
   window.LIVE2D_CFG.modelUrl = url;
-  console.log('[Live2D] switching to', url);
+  // モデルごとのプリセット（scale/anchor/offset）を適用
+  if (preset) {
+    window.LIVE2D_CFG.scale = preset.scale;
+    window.LIVE2D_CFG.anchorY = preset.anchorY;
+    window.LIVE2D_CFG.offsetY = preset.offsetY;
+  }
+  console.log('[Live2D] switching to', nameOrUrl, preset);
 
   // 既存モデルを破棄
   if (live2dModel && live2dApp) {
